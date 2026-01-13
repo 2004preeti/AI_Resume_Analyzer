@@ -1,3 +1,4 @@
+
 # import streamlit as st
 # import os
 # import tempfile
@@ -492,11 +493,14 @@ import streamlit as st
 import os
 import tempfile
 import PyPDF2
-import google.generativeai as genai
-import time
-from typing import Optional
+import requests
+import json
+import re
+from datetime import datetime
 
-# Set page configuration
+# ===============================
+# Streamlit Configuration
+# ===============================
 st.set_page_config(
     page_title="AI Resume Analyzer Pro",
     page_icon="📝",
@@ -504,645 +508,871 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialize session state
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
+# ===============================
+# Session State Variables
+# ===============================
 if 'analysis_result' not in st.session_state:
     st.session_state.analysis_result = ""
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
 if 'resume_text' not in st.session_state:
     st.session_state.resume_text = ""
 if 'job_title' not in st.session_state:
     st.session_state.job_title = ""
 if 'job_description' not in st.session_state:
     st.session_state.job_description = ""
-if 'api_key' not in st.session_state:
-    st.session_state.api_key = ""
-if 'last_request_time' not in st.session_state:
-    st.session_state.last_request_time = 0
-if 'selected_model' not in st.session_state:
-    st.session_state.selected_model = "gemini-2.0-flash"
+if 'api_mode' not in st.session_state:
+    st.session_state.api_mode = "offline"
 
-# Custom CSS - WHITE BACKGROUND REMOVED FROM ANALYSIS CONTAINER
+# ===============================
+# Custom CSS - Updated Colors
+# ===============================
 st.markdown("""
 <style>
-    .main-header {
-        text-align: center;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        font-size: 2.8rem;
-        font-weight: 800;
-        margin-bottom: 1rem;
-    }
-    .sub-header {
-        text-align: center;
-        color: #666;
-        font-size: 1.2rem;
-        margin-bottom: 2rem;
-    }
-    .stButton > button {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        font-weight: 600;
-        border: none;
-        border-radius: 8px;
-        padding: 0.75rem 1.5rem;
-        transition: all 0.3s;
-    }
-    .stButton > button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
-    }
-    /* ANALYSIS CONTAINER - WHITE BACKGROUND REMOVED */
-    .analysis-container {
-        border-radius: 12px;
-        padding: 2rem;
-        margin: 1.5rem 0;
-        border-left: 5px solid #667eea;
-    }
-    .upload-box {
-        background: white;
-        border-radius: 12px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-        border: 2px dashed #667eea;
-    }
-    .match-score {
-        text-align: center;
-        font-size: 3rem;
-        font-weight: 800;
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin: 1rem 0;
-    }
-    .section-title {
-        color: #2d3748;
-        font-size: 1.4rem;
-        font-weight: 700;
-        margin: 1.5rem 0 1rem 0;
-        padding-bottom: 0.5rem;
-        border-bottom: 2px solid #e2e8f0;
-    }
-    .chat-user {
-        background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1rem;
-        border-radius: 12px 12px 12px 4px;
-        margin: 0.5rem 0;
-        max-width: 80%;
-        margin-left: auto;
-    }
-    .chat-ai {
-        background: #f7fafc;
-        color: #2d3748;
-        padding: 1rem;
-        border-radius: 12px 12px 4px 12px;
-        margin: 0.5rem 0;
-        max-width: 80%;
-        border: 1px solid #e2e8f0;
-    }
-    .success-box {
-        background: #f0fff4;
-        border: 1px solid #9ae6b4;
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-    .warning-box {
-        background: #fffaf0;
-        border: 1px solid #fbd38d;
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-    .error-box {
-        background: #fff5f5;
-        border: 1px solid #fc8181;
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-    .info-box {
-        background: #ebf8ff;
-        border: 1px solid #90cdf4;
-        border-radius: 8px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-    /* Additional styles for transparent background */
-    .transparent-bg {
-        background: transparent !important;
-    }
-    .analysis-content {
-        padding: 1rem;
-        line-height: 1.6;
-    }
-    .analysis-content h3 {
-        color: #2d3748;
-        margin-top: 1.5rem;
-        margin-bottom: 0.5rem;
-    }
-    .analysis-content ul, .analysis-content ol {
-        padding-left: 1.5rem;
-        margin: 0.5rem 0;
-    }
-    .analysis-content li {
-        margin: 0.3rem 0;
-    }
+    .main {padding: 20px;}
+    .stButton>button {background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px;}
+    .result-box {border-left: 5px solid #667eea; padding: 25px; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); margin: 20px 0; border-radius: 10px;}
+    
+    /* Token box with gradient purple background */
+    .token-box {background: linear-gradient(135deg, #9c27b0 0%, #673ab7 100%); padding: 20px; border-radius: 10px; margin: 15px 0; border: 2px solid #7b1fa2; color: white; font-weight: bold;}
+    .token-box a {color: #ffeb3b !important; font-weight: bold; text-decoration: underline;}
+    .token-box a:hover {color: #fff176 !important;}
+    
+    /* Tip box - Light blue */
+    .tip-box {background: #e3f2fd; padding: 20px; border-radius: 10px; margin: 15px 0; border: 1px solid #bbdefb;}
+    
+    /* API status boxes */
+    .api-success {background: linear-gradient(135deg, #4CAF50 0%, #2E7D32 100%); color: white; padding: 15px; border-radius: 10px; border: 1px solid #388E3C;}
+    .api-warning {background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); color: white; padding: 15px; border-radius: 10px; border: 1px solid #FFA726;}
+    .api-error {background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%); color: white; padding: 15px; border-radius: 10px; border: 1px solid #e53935;}
+    
+    /* Header with gradient */
+    .header-text {background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 10px; color: white; text-align: center;}
+    
+    /* Metric boxes */
+    .metric-box {background: white; padding: 15px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center;}
+    
+    /* Mode selection cards */
+    .mode-card {padding: 15px; border-radius: 10px; margin: 10px 0; transition: transform 0.3s ease;}
+    .mode-card:hover {transform: translateY(-5px);}
+    .mode-offline {background: linear-gradient(135deg, #78909c 0%, #546e7a 100%); color: white;}
+    .mode-huggingface {background: linear-gradient(135deg, #ff6f00 0%, #e65100 100%); color: white;}
+    .mode-openrouter {background: linear-gradient(135deg, #00acc1 0%, #00838f 100%); color: white;}
+    .mode-deepseek {background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%); color: white;}
+    
+    /* Input fields */
+    .stTextInput>div>div>input {border-radius: 8px !important; border: 2px solid #667eea !important;}
+    .stTextArea>div>div>textarea {border-radius: 8px !important; border: 2px solid #667eea !important;}
+    
+    /* Sidebar styling */
+    .css-1d391kg {background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);}
+    
+    /* Selection highlight */
+    .selected-mode {border: 3px solid #ffeb3b !important; box-shadow: 0 0 15px rgba(255, 235, 59, 0.5);}
+    
+    /* Preview text styling */
+    .preview-text {font-family: monospace; font-size: 12px; line-height: 1.5; white-space: pre-wrap;}
 </style>
 """, unsafe_allow_html=True)
 
-# Function to extract text from PDF
-def extract_text_from_pdf(pdf_file) -> str:
+# ===============================
+# API Configuration
+# ===============================
+class APIManager:
+    def __init__(self):
+        self.services = {
+            "huggingface": {
+                "name": "🤗 Hugging Face",
+                "icon": "🤗",
+                "url": "https://api-inference.huggingface.co/models/{model}",
+                "models": ["mistralai/Mistral-7B-Instruct-v0.1", "google/flan-t5-xxl", "gpt2"],
+                "requires_token": True,
+                "color": "#ff6f00"
+            },
+            "openrouter": {
+                "name": "🔄 OpenRouter",
+                "icon": "🔄",
+                "url": "https://openrouter.ai/api/v1/chat/completions",
+                "models": ["mistralai/mistral-7b-instruct", "google/gemma-7b-it"],
+                "requires_token": False,
+                "free_key": "free",
+                "color": "#ff6f00"
+            },
+            "deepseek": {
+                "name": "🔍 DeepSeek",
+                "icon": "🔍",
+                "url": "https://api.deepseek.com/v1/chat/completions",
+                "models": ["deepseek-chat"],
+                "requires_token": False,
+                "free_key": "sk-free",
+                "color": "#ff6f00"
+            },
+            "offline": {
+                "name": "📴 Offline",
+                "icon": "📴",
+                "models": ["Local Analyzer"],
+                "requires_token": False,
+                "color": "#ff6f00"
+            }
+        }
+    
+    def test_api_connection(self, service_name, api_key=""):
+        """Test if API service is available"""
+        service = self.services.get(service_name)
+        if not service:
+            return False, "Service not found"
+        
+        if service_name == "offline":
+            return True, "Offline mode always available"
+        
+        try:
+            if service_name == "huggingface":
+                url = service["url"].format(model="gpt2")
+                headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+                response = requests.get(url, headers=headers, timeout=10)
+                return response.status_code == 200, f"Status: {response.status_code}"
+            
+            elif service_name == "openrouter":
+                headers = {
+                    "Authorization": f"Bearer {service['free_key']}",
+                    "HTTP-Referer": "http://localhost:8501",
+                    "X-Title": "Resume Analyzer"
+                }
+                response = requests.get("https://openrouter.ai/api/v1/models", headers=headers, timeout=10)
+                return response.status_code == 200, f"Status: {response.status_code}"
+            
+            elif service_name == "deepseek":
+                headers = {"Authorization": f"Bearer {service['free_key']}"}
+                response = requests.get("https://api.deepseek.com/v1/models", headers=headers, timeout=10)
+                return response.status_code == 200, f"Status: {response.status_code}"
+        
+        except Exception as e:
+            return False, f"Error: {str(e)}"
+        
+        return False, "Unknown error"
+
+# ===============================
+# PDF Processing
+# ===============================
+def extract_text_from_pdf(pdf_file):
     """Extract text from uploaded PDF file"""
-    text = ""
     try:
         pdf_reader = PyPDF2.PdfReader(pdf_file)
-        for page_num in range(len(pdf_reader.pages)):
-            page_text = pdf_reader.pages[page_num].extract_text()
+        text = ""
+        for page in pdf_reader.pages:
+            page_text = page.extract_text()
             if page_text:
                 text += page_text + "\n"
         return text.strip()
     except Exception as e:
-        st.error(f"Error reading PDF: {e}")
+        st.error(f"PDF extraction error: {str(e)}")
         return ""
 
-# Function to configure Gemini
-def configure_gemini(api_key: str) -> bool:
-    """Configure Gemini AI with API key"""
-    try:
-        genai.configure(api_key=api_key)
-        st.session_state.api_key = api_key
-        return True
-    except Exception as e:
-        st.error(f"Error configuring Gemini: {e}")
-        return False
+# ===============================
+# Offline Analysis Engine
+# ===============================
+class OfflineAnalyzer:
+    def __init__(self):
+        self.common_keywords = {
+            'technical': ['python', 'java', 'javascript', 'sql', 'aws', 'azure', 'docker', 'kubernetes', 
+                         'machine learning', 'data analysis', 'web development', 'api', 'react', 'node.js'],
+            'soft': ['leadership', 'communication', 'teamwork', 'problem solving', 'critical thinking',
+                    'project management', 'time management', 'adaptability', 'creativity'],
+            'business': ['strategy', 'budget', 'revenue', 'growth', 'efficiency', 'optimization',
+                        'stakeholder', 'analysis', 'reporting', 'presentation']
+        }
+    
+    def analyze(self, resume_text, job_title, job_description):
+        """Perform offline analysis"""
+        # Extract keywords
+        job_keywords = self._extract_keywords(job_description)
+        resume_keywords = self._extract_keywords(resume_text)
+        
+        # Calculate metrics
+        match_score = self._calculate_match_score(job_keywords, resume_keywords)
+        strengths = self._identify_strengths(resume_text, job_keywords)
+        improvements = self._identify_improvements(resume_text, job_keywords)
+        missing_keywords = self._find_missing_keywords(job_keywords, resume_keywords)
+        
+        # Generate report
+        report = self._generate_report(match_score, strengths, improvements, missing_keywords, 
+                                      job_title, len(resume_text))
+        return report
+    
+    def _extract_keywords(self, text):
+        """Extract keywords from text"""
+        if not text:
+            return []
+        
+        # Convert to lowercase and find words
+        words = re.findall(r'\b[a-z]{4,}\b', text.lower())
+        
+        # Remove common stop words
+        stop_words = {'with', 'this', 'that', 'have', 'from', 'which', 'their', 'would', 'should'}
+        keywords = [word for word in words if word not in stop_words]
+        
+        # Add specific skills if mentioned
+        all_skills = []
+        for category in self.common_keywords.values():
+            all_skills.extend(category)
+        
+        found_skills = [skill for skill in all_skills if skill in text.lower()]
+        
+        return list(set(keywords[:30] + found_skills))
+    
+    def _calculate_match_score(self, job_keywords, resume_keywords):
+        """Calculate match percentage"""
+        if not job_keywords:
+            return 65
+        
+        matched = set(job_keywords) & set(resume_keywords)
+        score = int((len(matched) / len(job_keywords)) * 100)
+        return min(max(score, 30), 95)
+    
+    def _identify_strengths(self, resume_text, job_keywords):
+        """Identify strengths in resume"""
+        strengths = []
+        
+        # Check structure
+        sections = ['experience', 'education', 'skills', 'projects', 'summary']
+        found_sections = [section for section in sections if section in resume_text.lower()]
+        
+        if len(found_sections) >= 3:
+            strengths.append(f"Good structure with {len(found_sections)} key sections")
+        
+        # Check length
+        word_count = len(resume_text.split())
+        if 300 <= word_count <= 800:
+            strengths.append(f"Optimal length ({word_count} words)")
+        
+        # Check contact info
+        contact_patterns = [r'\b[\w\.-]+@[\w\.-]+\.\w{2,}\b', r'\+\d{10,}', r'linkedin\.com']
+        contact_found = any(re.search(pattern, resume_text, re.IGNORECASE) for pattern in contact_patterns)
+        if contact_found:
+            strengths.append("Contact information included")
+        
+        return strengths if strengths else ["Resume format is clean and readable"]
+    
+    def _identify_improvements(self, resume_text, job_keywords):
+        """Identify areas for improvement"""
+        improvements = []
+        
+        # Check for numbers/quantification
+        numbers = re.findall(r'\b\d+%\b|\b\d+\s*\%\b|\$\d+|\d+\s*(years|months)', resume_text)
+        if len(numbers) < 2:
+            improvements.append("Add more quantifiable achievements (use numbers)")
+        
+        # Check action verbs
+        action_verbs = ['managed', 'developed', 'created', 'increased', 'reduced', 'improved', 
+                       'led', 'implemented', 'designed', 'optimized']
+        verb_count = sum(1 for verb in action_verbs if verb in resume_text.lower())
+        if verb_count < 3:
+            improvements.append("Use more action verbs to start bullet points")
+        
+        # Check keywords match
+        if job_keywords:
+            matched_keywords = [kw for kw in job_keywords if kw in resume_text.lower()]
+            if len(matched_keywords) < len(job_keywords) * 0.3:
+                improvements.append("Increase keyword matching with job description")
+        
+        return improvements if improvements else ["Review for consistency and formatting"]
+    
+    def _find_missing_keywords(self, job_keywords, resume_keywords):
+        """Find keywords from JD missing in resume"""
+        if not job_keywords:
+            return ["technical skills", "relevant experience", "achievements"]
+        
+        missing = set(job_keywords[:10]) - set(resume_keywords)
+        return list(missing)[:5] if missing else ["industry-specific terms"]
+    
+    def _generate_report(self, score, strengths, improvements, missing_keywords, job_title, resume_length):
+        """Generate formatted analysis report"""
+        current_date = datetime.now().strftime("%Y-%m-%d")
+        
+        report = f"""
+        🚀 **AI RESUME ANALYSIS REPORT**
+        ================================
+        **Job Target:** {job_title if job_title else "Not specified"}
+        **Analysis Date:** {current_date}
+        **Resume Length:** {resume_length} characters
+        
+        📊 **MATCH SCORE:** **{score}/100**
+        
+        ✅ **KEY STRENGTHS:**
+        {chr(10).join(['• ' + s for s in strengths])}
+        
+        ⚠️ **AREAS FOR IMPROVEMENT:**
+        {chr(10).join(['• ' + i for i in improvements])}
+        
+        🔍 **MISSING KEYWORDS:**
+        {chr(10).join(['• ' + mk.title() for mk in missing_keywords])}
+        
+        💡 **ACTIONABLE RECOMMENDATIONS:**
+        • Quantify achievements with specific numbers
+        • Start each bullet point with strong action verbs
+        • Tailor resume specifically for each job application
+        • Include relevant certifications and projects
+        • Proofread for spelling and grammar errors
+        
+        🎯 **NEXT STEPS:**
+        1. Review job description and add missing keywords
+        2. Add 3-5 quantifiable achievements
+        3. Optimize for ATS (Applicant Tracking System)
+        4. Get feedback from peers or mentors
+        5. Save final version as PDF
+        
+        *Generated using Smart Resume Analyzer | Offline Mode*
+        """
+        return report
 
-# Function to get Gemini model
-def get_gemini_model(model_name: str = None) -> Optional[genai.GenerativeModel]:
-    """Get Gemini model instance"""
-    try:
-        if not st.session_state.api_key:
-            return None
+# ===============================
+# Online API Analysis
+# ===============================
+class OnlineAnalyzer:
+    def __init__(self, api_manager):
+        self.api_manager = api_manager
+    
+    def analyze_with_api(self, prompt, service_name="huggingface", api_key="", model=""):
+        """Analyze using online API"""
+        service = self.api_manager.services.get(service_name)
+        if not service:
+            return "Service not available"
         
-        genai.configure(api_key=st.session_state.api_key)
-        
-        # Use selected model or default
-        if not model_name:
-            model_name = st.session_state.selected_model
-        
-        # Try to get the model
         try:
-            model = genai.GenerativeModel(model_name)
-            # Test with a small prompt
-            test_response = model.generate_content("Test")
-            if test_response and test_response.text:
-                return model
+            if service_name == "huggingface":
+                return self._call_huggingface(prompt, model, api_key)
+            elif service_name == "openrouter":
+                return self._call_openrouter(prompt, model)
+            elif service_name == "deepseek":
+                return self._call_deepseek(prompt, model)
         except Exception as e:
-            st.warning(f"Model {model_name} failed: {str(e)[:100]}")
-            
-            # Fallback models in order of preference
-            fallback_models = [
-                'gemini-2.0-flash',
-                'gemini-2.0-flash-001',
-                'gemini-pro-latest',
-                'gemini-2.0-flash-lite',
-                'gemini-1.5-flash-latest'
-            ]
-            
-            for fallback in fallback_models:
-                try:
-                    model = genai.GenerativeModel(fallback)
-                    test_response = model.generate_content("Test")
-                    if test_response.text:
-                        st.session_state.selected_model = fallback
-                        st.info(f"Using fallback model: {fallback}")
-                        return model
-                except:
-                    continue
-            
-            return None
-            
-    except Exception as e:
-        st.error(f"Error getting model: {e}")
-        return None
-
-# Basic analysis without API
-def analyze_resume_basic(resume_text: str, job_title: str, job_description: str) -> str:
-    """Perform basic keyword analysis without API"""
-    
-    resume_lower = resume_text.lower()
-    job_lower = job_description.lower()
-    
-    # Common skills to check
-    skills_list = [
-        'python', 'java', 'javascript', 'sql', 'html', 'css', 'react', 'angular',
-        'node.js', 'aws', 'azure', 'docker', 'kubernetes', 'machine learning',
-        'data analysis', 'excel', 'power bi', 'tableau', 'project management',
-        'agile', 'scrum', 'leadership', 'communication', 'teamwork', 'problem solving',
-        'analytical skills', 'time management', 'creativity', 'adaptability'
-    ]
-    
-    # Find skills in job description
-    job_skills = []
-    for skill in skills_list:
-        if skill in job_lower:
-            job_skills.append(skill)
-    
-    # Find matching skills in resume
-    matching_skills = []
-    for skill in job_skills:
-        if skill in resume_lower:
-            matching_skills.append(skill)
-    
-    # Calculate match score
-    if job_skills:
-        match_score = int((len(matching_skills) / len(job_skills)) * 100)
-    else:
-        match_score = 50
-    
-    # Prepare analysis - WITHOUT WHITE BACKGROUND
-    analysis = f"""
-<div class="analysis-container transparent-bg">
-    <div class="match-score">Match Score: {match_score}%</div>
-    
-    <div class="section-title">📊 Analysis Summary</div>
-    
-    <div class="analysis-content">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin: 1.5rem 0;">
-            <div>
-                <h4>✅ Found Skills ({len(matching_skills)})</h4>
-                <ul>
-                    {''.join([f'<li>{skill.title()}</li>' for skill in matching_skills[:10]])}
-                </ul>
-            </div>
-            
-            <div>
-                <h4>❌ Missing Skills ({len(job_skills) - len(matching_skills)})</h4>
-                <ul>
-                    {''.join([f'<li>{skill.title()}</li>' for skill in list(set(job_skills) - set(matching_skills))[:10]])}
-                </ul>
-            </div>
-        </div>
+            return f"API Error: {str(e)}"
         
-        <div class="section-title">💡 Recommendations</div>
+        return "API service unavailable"
+    
+    def _call_huggingface(self, prompt, model, api_key):
+        """Call Hugging Face API"""
+        if not model:
+            model = "gpt2"
         
-        <div style="background: rgba(248, 250, 252, 0.5); padding: 1.5rem; border-radius: 8px; margin: 1rem 0;">
-            <ol>
-                <li><strong>Add Missing Keywords:</strong> Incorporate {', '.join(list(set(job_skills) - set(matching_skills))[:3]) if len(job_skills) > len(matching_skills) else 'relevant keywords'} naturally into your resume.</li>
-                <li><strong>Quantify Achievements:</strong> Use numbers and metrics (e.g., "Increased efficiency by 30%", "Managed team of 10").</li>
-                <li><strong>Use Action Verbs:</strong> Start bullet points with strong verbs like: Achieved, Built, Created, Developed, Improved, Led, Managed, Optimized.</li>
-                <li><strong>Tailor Your Resume:</strong> Customize your resume specifically for this {job_title} position.</li>
-                <li><strong>Check Format:</strong> Ensure your resume is clean, professional, and 1-2 pages maximum.</li>
-            </ol>
-        </div>
-    </div>
-    
-    <div class="warning-box">
-        <strong>Note:</strong> This is a basic keyword analysis. For comprehensive AI-powered analysis with detailed insights, 
-        add your Gemini API key in the sidebar.
-    </div>
-</div>
-"""
-    return analysis
-
-# AI-powered analysis
-def analyze_resume_ai(resume_text: str, job_title: str, job_description: str) -> str:
-    """Perform AI-powered resume analysis using Gemini"""
-    
-    model = get_gemini_model()
-    if model is None:
-        return "⚠️ Could not connect to AI service. Please check your API key."
-    
-    # Prepare prompt
-    prompt = f"""You are an expert resume analyst and career coach. Analyze this resume for a {job_title} position.
-
-JOB DESCRIPTION:
-{job_description[:2000]}
-
-RESUME CONTENT:
-{resume_text[:3000]}
-
-Please provide a comprehensive analysis including:
-
-1. **Overall Match Score** (as a percentage 0-100%)
-2. **Key Strengths** (3-5 points that align well with the job)
-3. **Areas for Improvement** (3-5 specific areas to work on)
-4. **Missing Keywords/Skills** (from job description that are missing in resume)
-5. **Actionable Recommendations** (3-5 specific, actionable steps to improve)
-
-Format your response professionally with clear sections. Start with the match score prominently displayed.
-
-IMPORTANT: Make sure to include "Match Score: XX%" at the beginning where XX is the percentage."""
-
-    try:
-        with st.spinner("🤖 AI is analyzing your resume..."):
-            response = model.generate_content(prompt)
-            
-        if response and response.text:
-            # Ensure match score is properly formatted
-            result = response.text
-            if "Match Score:" not in result:
-                result = f"Match Score: (Analyzed by AI)\n\n{result}"
-            
-            return result
+        url = f"https://api-inference.huggingface.co/models/{model}"
+        headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
+        
+        payload = {
+            "inputs": prompt[:1500],
+            "parameters": {
+                "max_new_tokens": 500,
+                "temperature": 0.7,
+            }
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if isinstance(data, list) and len(data) > 0:
+                return data[0].get("generated_text", str(data))
+            return str(data)
         else:
-            return "❌ No response received from AI. Please try again."
-            
-    except Exception as e:
-        error_msg = str(e)
-        if "429" in error_msg or "quota" in error_msg.lower():
-            return "⚠️ API rate limit exceeded. Please wait a minute and try again, or use the basic analysis."
-        elif "503" in error_msg or "unavailable" in error_msg.lower():
-            return "🔧 Service temporarily unavailable. Please try again shortly."
-        else:
-            return f"❌ Error: {error_msg[:150]}"
-
-# Function to handle chat questions
-def ask_resume_question(question: str, context: str) -> str:
-    """Handle chat questions about resume"""
-    model = get_gemini_model()
-    if model is None:
-        return "Please configure your API key first."
+            return f"Hugging Face Error: {response.status_code}"
     
-    prompt = f"""You are a helpful career coach. Answer this question based on the resume analysis:
+    def _call_openrouter(self, prompt, model):
+        """Call OpenRouter API (free tier)"""
+        if not model:
+            model = "mistralai/mistral-7b-instruct"
+        
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": "Bearer free",
+            "HTTP-Referer": "http://localhost:8501",
+            "X-Title": "Resume Analyzer",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 500
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+        else:
+            return f"OpenRouter Error: {response.status_code}"
+    
+    def _call_deepseek(self, prompt, model):
+        """Call DeepSeek API (free tier)"""
+        url = "https://api.deepseek.com/v1/chat/completions"
+        headers = {
+            "Authorization": "Bearer sk-free",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": 500,
+            "temperature": 0.7
+        }
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        
+        if response.status_code == 200:
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
+        else:
+            return f"DeepSeek Error: {response.status_code}"
 
-CONTEXT:
-{context[:1500]}
-
-QUESTION: {question}
-
-Provide a helpful, specific, and actionable answer. Keep it concise and practical."""
-
-    try:
-        response = model.generate_content(prompt)
-        return response.text if response and response.text else "No response received."
-    except Exception as e:
-        return f"Error: {str(e)[:100]}"
-
-# Main application
+# ===============================
+# Main Application
+# ===============================
 def main():
-    # Header
-    st.markdown('<h1 class="main-header">🚀 AI Resume Analyzer Pro</h1>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Upload your resume and get AI-powered insights to land your dream job</p>', unsafe_allow_html=True)
+    # Initialize managers
+    api_manager = APIManager()
+    offline_analyzer = OfflineAnalyzer()
+    online_analyzer = OnlineAnalyzer(api_manager)
     
-    # Sidebar
+    # Header with gradient
+    st.markdown("""
+    <div class="header-text">
+        <h1 style="margin:0;">📝 AI Resume Analyzer Pro</h1>
+        <p style="margin:5px 0 0 0; font-size:1.2em;">Smart Analysis with Online & Offline Modes</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Sidebar Configuration
     with st.sidebar:
         st.markdown("### ⚙️ Configuration")
         
-        # API Key Input
-        api_key = st.text_input(
-            "🔑 Gemini API Key",
-            type="password",
-            help="Get your free API key from https://makersuite.google.com/app/apikey",
-            value=st.session_state.get('api_key', '')
-        )
+        # Mode Selection with Cards
+        st.markdown("#### 🔧 Select Analysis Mode")
         
-        if api_key and api_key != st.session_state.get('api_key', ''):
-            if configure_gemini(api_key):
-                st.markdown('<div class="success-box">✅ API Key Configured Successfully!</div>', unsafe_allow_html=True)
-        
-        # Model Selection
-        st.markdown("### 🤖 AI Model")
-        model_options = [
-            "gemini-2.0-flash (Fast & Efficient)",
-            "gemini-2.0-flash-001",
-            "gemini-pro-latest",
-            "gemini-2.0-flash-lite",
-            "gemini-2.5-flash"
-        ]
-        
-        selected_model_display = st.selectbox(
-            "Select Model",
-            model_options,
-            index=0
-        )
-        
-        # Extract model name from display
-        if "gemini-2.0-flash (Fast & Efficient)" in selected_model_display:
-            st.session_state.selected_model = "gemini-2.0-flash"
-        else:
-            st.session_state.selected_model = selected_model_display.split()[0]
-        
-        st.markdown("---")
-        
-        # Quick Tips
-        st.markdown("### 💡 Quick Tips")
-        st.markdown("""
-        1. **Upload PDF** resumes only
-        2. **Copy-paste** full job description
-        3. **Use API key** for best results
-        4. **Review** all recommendations
-        5. **Customize** resume for each job
-        """)
-        
-        # About
-        with st.expander("ℹ️ About This Tool"):
-            st.markdown("""
-            This AI Resume Analyzer helps you:
-            - 📊 Get match score with job
-            - ✅ Identify strengths
-            - ⚠️ Find improvement areas
-            - 💡 Get actionable advice
-            - 💬 Ask follow-up questions
-            """)
-    
-    # Main content in tabs
-    tab1, tab2 = st.tabs(["📄 Resume Analysis", "💬 Ask Questions"])
-    
-    with tab1:
-        # Two column layout for upload and job details
         col1, col2 = st.columns(2)
-        
         with col1:
-            st.markdown("### 📄 Upload Your Resume")
-            st.markdown('<div class="upload-box">', unsafe_allow_html=True)
+            if st.button("📴 Offline", use_container_width=True, 
+                        help="No API required. Fast and private."):
+                st.session_state.api_mode = "offline"
+                st.rerun()
+        
+        with col2:
+            if st.button("🤗 Hugging Face", use_container_width=True,
+                        help="Requires API token. Most powerful."):
+                st.session_state.api_mode = "huggingface"
+                st.rerun()
+        
+        col3, col4 = st.columns(2)
+        with col3:
+            if st.button("🔄 OpenRouter", use_container_width=True,
+                        help="Free API. No token required."):
+                st.session_state.api_mode = "openrouter"
+                st.rerun()
+        
+        with col4:
+            if st.button("🔍 DeepSeek", use_container_width=True,
+                        help="Free API. No token required."):
+                st.session_state.api_mode = "deepseek"
+                st.rerun()
+        
+        # Current mode indicator
+        current_mode = st.session_state.api_mode
+        mode_info = api_manager.services.get(current_mode, {})
+        mode_color = mode_info.get('color', '#78909c')
+        mode_name = mode_info.get('name', 'Offline')
+        
+        st.markdown(f"""
+        <div style="background: {mode_color}; color: white; padding: 10px; border-radius: 8px; text-align: center; margin: 10px 0;">
+            <strong>Current Mode:</strong> {mode_name}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # API Configuration based on mode
+        api_key = ""
+        selected_model = ""
+        
+        if current_mode == "huggingface":
+            # Updated Token Box with Purple Gradient Background
+            st.markdown("""
+            <div class="token-box">
+                <strong>🔑 Get Your Free Token:</strong><br>
+                <a href="https://huggingface.co/settings/tokens" target="_blank" style="color: #ffeb3b; text-decoration: underline;">
+                    👉 Click Here: huggingface.co/settings/tokens
+                </a><br><br>
+                <small>1. Sign up / Log in to Hugging Face<br>
+                2. Go to Settings → Tokens<br>
+                3. Click "New token"<br>
+                4. Select "Read" access<br>
+                5. Copy and paste below</small>
+            </div>
+            """, unsafe_allow_html=True)
             
-            uploaded_file = st.file_uploader(
-                "Drag and drop or click to upload PDF",
-                type=['pdf'],
-                label_visibility="collapsed",
-                key="resume_uploader"
+            api_key = st.text_input(
+                "Enter Hugging Face Token",
+                type="password",
+                placeholder="hf_xxxxxxxxxxxxxxxx",
+                help="Token should start with 'hf_'"
             )
             
-            if uploaded_file is not None:
-                # Extract text from PDF
+            selected_model = st.selectbox(
+                "Select Model",
+                api_manager.services["huggingface"]["models"],
+                help="Choose AI model for analysis"
+            )
+            
+            # Test Connection Button
+            if api_key:
+                if st.button("🔗 Test Connection", use_container_width=True):
+                    with st.spinner("Testing connection..."):
+                        success, message = api_manager.test_api_connection("huggingface", api_key)
+                        if success:
+                            st.markdown('<div class="api-success">✅ Connection Successful!</div>', unsafe_allow_html=True)
+                        else:
+                            st.markdown(f'<div class="api-error">❌ {message}</div>', unsafe_allow_html=True)
+        
+        elif current_mode == "openrouter":
+            st.markdown("""
+            <div class="tip-box">
+                <strong>🆓 Free Public API</strong><br>
+                No token required! Using OpenRouter's free tier.<br>
+                <small>Rate limits may apply. For unlimited use, get API key from <a href="https://openrouter.ai/keys" target="_blank">openrouter.ai</a></small>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            selected_model = st.selectbox(
+                "Select Model",
+                api_manager.services["openrouter"]["models"]
+            )
+            
+            if st.button("🔗 Test Connection", use_container_width=True):
+                with st.spinner("Testing connection..."):
+                    success, message = api_manager.test_api_connection("openrouter")
+                    if success:
+                        st.markdown('<div class="api-success">✅ Connection Successful!</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f'<div class="api-warning">⚠️ {message}</div>', unsafe_allow_html=True)
+        
+        elif current_mode == "deepseek":
+            st.markdown("""
+            <div class="token-box">
+                <strong>🆓 Free Public API</strong><br>
+                No token required! Using DeepSeek's free tier.<br>
+                <small>Rate limits may apply. For unlimited use, sign up at <a href="https://platform.deepseek.com/api_keys" target="_blank">deepseek.com</a></small>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            selected_model = st.selectbox(
+                "Select Model",
+                api_manager.services["deepseek"]["models"]
+            )
+            
+            if st.button("🔗 Test Connection", use_container_width=True):
+                with st.spinner("Testing connection..."):
+                    success, message = api_manager.test_api_connection("deepseek")
+                    if success:
+                        st.markdown('<div class="api-success">✅ Connection Successful!</div>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f'<div class="api-warning">⚠️ {message}</div>', unsafe_allow_html=True)
+        
+        else:  # offline
+            st.markdown("""
+            <div class="token-box">
+                <strong>🔒 Privacy Mode</strong><br>
+                Your data stays on your device.<br>
+                No internet required.<br>
+                <small>Basic analysis with keyword matching</small>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.divider()
+        
+        # Quick Stats
+        st.markdown("### 📈 Quick Stats")
+        col1, col2 = st.columns(2)
+        with col1:
+            resume_len = len(st.session_state.resume_text) if st.session_state.resume_text else 0
+            st.metric("Resume Length", f"{resume_len} chars")
+        
+        with col2:
+            job_display = st.session_state.job_title[:12] + "..." if st.session_state.job_title and len(st.session_state.job_title) > 12 else st.session_state.job_title or "N/A"
+            st.metric("Job Title", job_display)
+        
+        st.divider()
+        
+        # Tips Section
+        st.markdown("### 💡 Quick Tips")
+        st.markdown("""
+        <div class="token-box">
+            <strong>For Best Results:</strong><br>
+            1. <strong>OpenRouter/DeepSeek:</strong> Best free options<br>
+            2. <strong>Hugging Face:</strong> Most powerful (needs token)<br>
+            3. <strong>Offline:</strong> Privacy first<br>
+            4. Always tailor resume for each job<br>
+            5. Quantify achievements with numbers<br>
+            6. Use action verbs<br>
+            7. Check for spelling errors
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Main Content Area
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.markdown("### 📄 Upload Resume")
+        
+        uploaded_file = st.file_uploader(
+            "Choose PDF file", 
+            type=['pdf'], 
+            key="resume_uploader",
+            help="Upload your resume in PDF format"
+        )
+        
+        if uploaded_file:
+            with st.spinner("📖 Extracting text from PDF..."):
                 resume_text = extract_text_from_pdf(uploaded_file)
                 if resume_text:
                     st.session_state.resume_text = resume_text
+                    st.success(f"✅ Resume uploaded! ({len(resume_text)} characters)")
                     
-                    # Show resume info
-                    file_size = len(uploaded_file.getvalue()) / 1024  # KB
-                    word_count = len(resume_text.split())
-                    
-                    col_a, col_b = st.columns(2)
-                    with col_a:
-                        st.metric("📏 File Size", f"{file_size:.1f} KB")
-                    with col_b:
-                        st.metric("📝 Word Count", f"{word_count}")
-                    
-                    # Preview
-                    with st.expander("👁️ Preview Resume Text", expanded=False):
+                    with st.expander("🔍 Preview Resume Text", expanded=False):
+                        preview = resume_text[:300] + "..." if len(resume_text) > 300 else resume_text
+                        # FIXED: Added proper label to avoid warning
                         st.text_area(
-                            "",
-                            value=resume_text[:800] + "..." if len(resume_text) > 800 else resume_text,
-                            height=200,
-                            disabled=True
+                            "Resume Preview", 
+                            value=preview,
+                            height=150,
+                            disabled=True,
+                            label_visibility="collapsed"
                         )
+                        st.caption(f"Total characters: {len(resume_text)}")
                 else:
                     st.error("Could not extract text from PDF. Please try another file.")
-            else:
-                st.info("📁 Upload your resume in PDF format")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown("### 💼 Job Details")
-            st.markdown('<div class="upload-box">', unsafe_allow_html=True)
-            
-            job_title = st.text_input(
-                "Job Title*",
-                placeholder="e.g., Data Scientist, Software Engineer, Marketing Manager",
-                value=st.session_state.get('job_title', '')
-            )
-            st.session_state.job_title = job_title
-            
-            job_description = st.text_area(
-                "Job Description*",
-                height=250,
-                placeholder="Paste the complete job description here...",
-                value=st.session_state.get('job_description', '')
-            )
-            st.session_state.job_description = job_description
-            
-            if job_description:
-                word_count = len(job_description.split())
-                st.caption(f"📊 Job description: {word_count} words")
-            
-            st.markdown('</div>', unsafe_allow_html=True)
-        
-        # Analyze Button
-        st.markdown("---")
-        
-        col_btn1, col_btn2, col_btn3 = st.columns([1, 2, 1])
-        with col_btn2:
-            analyze_disabled = not (st.session_state.resume_text and 
-                                   st.session_state.job_title and 
-                                   st.session_state.job_description)
-            
-            analyze_clicked = st.button(
-                "🔍 ANALYZE RESUME NOW",
-                type="primary",
-                disabled=analyze_disabled,
-                use_container_width=True
-            )
-        
-        # Perform Analysis
-        if analyze_clicked:
-            with st.spinner("Analyzing your resume..."):
-                if st.session_state.api_key:
-                    # Use AI analysis
-                    result = analyze_resume_ai(
-                        st.session_state.resume_text,
-                        st.session_state.job_title,
-                        st.session_state.job_description
-                    )
-                else:
-                    # Use basic analysis
-                    result = analyze_resume_basic(
-                        st.session_state.resume_text,
-                        st.session_state.job_title,
-                        st.session_state.job_description
-                    )
-                
-                st.session_state.analysis_result = result
-        
-        # Display Results - WITHOUT EXTRA CONTAINER
-        if st.session_state.analysis_result:
-            st.markdown("---")
-            st.markdown("### 📋 Analysis Results")
-            
-            # Check if result is HTML or plain text
-            if "<div" in st.session_state.analysis_result:
-                st.markdown(st.session_state.analysis_result, unsafe_allow_html=True)
-            else:
-                # For plain text results, format with transparent background
-                st.markdown(f"""
-                <div class="analysis-container transparent-bg">
-                    <div class="analysis-content">
-                        {st.session_state.analysis_result}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-    
-    with tab2:
-        st.markdown("### 💬 Chat with Resume Coach")
-        
-        if not st.session_state.analysis_result:
-            st.info("👈 First analyze your resume in the 'Resume Analysis' tab")
         else:
-            # Display chat history
-            chat_container = st.container()
+            st.info("📁 Please upload your resume in PDF format")
+    
+    with col2:
+        st.markdown("### 💼 Job Details")
+        
+        job_title = st.text_input(
+            "Target Job Title *",
+            value=st.session_state.job_title,
+            placeholder="e.g., Data Scientist, Software Engineer, Marketing Manager",
+            help="Required for analysis"
+        )
+        st.session_state.job_title = job_title
+        
+        job_description = st.text_area(
+            "Paste Job Description *",
+            value=st.session_state.job_description,
+            height=200,
+            placeholder="Copy and paste the complete job description here...\n\nInclude:\n- Responsibilities\n- Requirements\n- Skills needed\n- Qualifications",
+            help="Required for analysis"
+        )
+        st.session_state.job_description = job_description
+        
+        if job_description:
+            word_count = len(job_description.split())
+            char_count = len(job_description)
+            st.caption(f"📝 Job Description: {word_count} words, {char_count} characters")
+    
+    # Analysis Button
+    st.markdown("---")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        analyze_disabled = not st.session_state.resume_text
+        analyze_btn = st.button(
+            "🚀 START AI ANALYSIS",
+            type="primary",
+            use_container_width=True,
+            disabled=analyze_disabled,
+            help="Click to analyze your resume"
+        )
+    
+    if analyze_disabled:
+        st.warning("⚠️ Please upload a resume first")
+    
+    # Perform Analysis
+    if analyze_btn:
+        if not st.session_state.resume_text:
+            st.error("Please upload a resume first")
+        else:
+            # Prepare analysis prompt
+            analysis_prompt = f"""
+            Analyze this resume for a {job_title} position:
             
-            with chat_container:
-                for i, message in enumerate(st.session_state.chat_history[-10:]):  # Last 10 messages
-                    if message["is_user"]:
-                        st.markdown(f'<div class="chat-user">{message["text"]}</div>', unsafe_allow_html=True)
-                    else:
-                        st.markdown(f'<div class="chat-ai">{message["text"]}</div>', unsafe_allow_html=True)
+            JOB DESCRIPTION:
+            {job_description[:1000] if job_description else 'Not provided'}
             
-            # Chat input
-            st.markdown("---")
+            RESUME CONTENT:
+            {st.session_state.resume_text[:2000]}
             
-            col_input1, col_input2 = st.columns([5, 1])
+            Provide detailed analysis including:
+            1. Match Score (0-100%)
+            2. Key Strengths
+            3. Areas for Improvement
+            4. Missing Keywords
+            5. Actionable Recommendations
+            6. ATS Optimization Tips
             
-            with col_input1:
-                user_question = st.text_input(
-                    "Ask a question about your resume analysis:",
-                    placeholder="e.g., How can I improve my technical skills section?",
-                    label_visibility="collapsed",
-                    key="chat_input"
-                )
+            Format with clear headings and bullet points.
+            Be specific and constructive.
+            """
             
-            with col_input2:
-                st.write("")  # Spacing
-                ask_button = st.button("Send", use_container_width=True)
+            # Show progress
+            progress_bar = st.progress(0)
+            status_text = st.empty()
             
-            if ask_button and user_question:
-                if not st.session_state.api_key:
-                    st.warning("Please add your API key in the sidebar to use chat features.")
-                else:
-                    # Add user message to history
-                    st.session_state.chat_history.append({
-                        "text": user_question,
-                        "is_user": True
-                    })
+            # Perform analysis based on selected mode
+            try:
+                if current_mode == "offline":
+                    status_text.text("🔄 Running offline analysis...")
+                    progress_bar.progress(30)
                     
-                    # Get AI response
-                    with st.spinner("Thinking..."):
-                        ai_response = ask_resume_question(
-                            user_question,
-                            st.session_state.analysis_result
+                    result = offline_analyzer.analyze(
+                        st.session_state.resume_text,
+                        job_title,
+                        job_description
+                    )
+                    
+                    progress_bar.progress(100)
+                    status_text.text("✅ Analysis complete!")
+                    st.session_state.analysis_result = result
+                
+                else:
+                    status_text.text(f"🔄 Connecting to {mode_name}...")
+                    progress_bar.progress(20)
+                    
+                    result = online_analyzer.analyze_with_api(
+                        analysis_prompt,
+                        current_mode,
+                        api_key if current_mode == "huggingface" else "",
+                        selected_model
+                    )
+                    
+                    progress_bar.progress(80)
+                    
+                    if "Error" in result or "unavailable" in result.lower():
+                        status_text.text("⚠️ API failed, switching to offline analysis...")
+                        result = offline_analyzer.analyze(
+                            st.session_state.resume_text,
+                            job_title,
+                            job_description
                         )
                     
-                    # Add AI response to history
-                    st.session_state.chat_history.append({
-                        "text": ai_response,
-                        "is_user": False
-                    })
-                    
-                    # Rerun to show new messages
-                    st.rerun()
+                    progress_bar.progress(100)
+                    status_text.text("✅ Analysis complete!")
+                    st.session_state.analysis_result = result
+                
+            except Exception as e:
+                st.error(f"Analysis failed: {str(e)}")
+                result = offline_analyzer.analyze(
+                    st.session_state.resume_text,
+                    job_title,
+                    job_description
+                )
+                st.session_state.analysis_result = result
     
-    # Footer
-    st.markdown("---")
-    st.markdown("""
-    <div style="text-align: center; color: #718096; font-size: 0.9rem; padding: 1rem;">
-    <p>Made with ❤️ using Streamlit & Google Gemini AI | Upload PDF resumes only</p>
-    </div>
-    """, unsafe_allow_html=True)
+    # Display Results
+    if st.session_state.analysis_result:
+        st.markdown("### 📊 Analysis Results")
+        
+        # Mode indicator
+        mode_display = {
+            "offline": "📴 Offline Analysis",
+            "huggingface": "🤗 Hugging Face API",
+            "openrouter": "🔄 OpenRouter API",
+            "deepseek": "🔍 DeepSeek API"
+        }
+        
+        st.caption(f"*Analysis Mode: {mode_display.get(current_mode, 'Unknown')} | Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}*")
+        
+        # Results container
+        st.markdown(f'<div class="result-box">{st.session_state.analysis_result}</div>', unsafe_allow_html=True)
+        
+        # Action buttons
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            if st.button("📥 Download Report", use_container_width=True, help="Download analysis as text file"):
+                report_text = f"""
+                RESUME ANALYSIS REPORT
+                ======================
+                Date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+                Mode: {mode_display.get(current_mode, 'Unknown')}
+                Job Title: {job_title}
+                
+                {st.session_state.analysis_result}
+                """
+                
+                st.download_button(
+                    label="Click to Download",
+                    data=report_text,
+                    file_name=f"resume_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                    mime="text/plain"
+                )
+        
+        with col2:
+            if st.button("🔄 Re-analyze", use_container_width=True, help="Run analysis again"):
+                st.session_state.analysis_result = ""
+                st.rerun()
+        
+        with col3:
+            if st.button("⚙️ Change Mode", use_container_width=True, help="Try different analysis mode"):
+                st.rerun()
+        
+        # Chat-like Q&A Section
+        st.markdown("---")
+        st.markdown("### 💬 Ask About Your Analysis")
+        
+        # Suggested questions
+        st.markdown("**Quick Questions:**")
+        q_col1, q_col2, q_col3 = st.columns(3)
+        
+        with q_col1:
+            if st.button("How to improve score?", use_container_width=True):
+                response = "To improve your match score, focus on adding missing keywords from the job description, quantifying achievements with specific numbers, and highlighting transferable skills."
+                st.info(response)
+        
+        with q_col2:
+            if st.button("Best format tips?", use_container_width=True):
+                response = "Use a clean, professional template with clear sections. Ensure proper spacing, consistent fonts, and save as PDF. ATS-friendly resumes avoid tables and graphics."
+                st.info(response)
+        
+        with q_col3:
+            if st.button("Keyword strategy?", use_container_width=True):
+                response = "Naturally integrate keywords in skills section, work experience, and summary. Use variations and synonyms. Avoid keyword stuffing which can hurt readability."
+                st.info(response)
+        
+        # Custom question
+        user_question = st.text_input(
+            "Ask your own question:",
+            placeholder="e.g., How can I highlight my leadership experience?"
+        )
+        
+        if user_question:
+            with st.spinner("🤔 Thinking..."):
+                # Simple AI response based on question type
+                if any(word in user_question.lower() for word in ["leadership", "manage", "team"]):
+                    response = "For leadership experience: Use action verbs like 'Led', 'Managed', 'Directed'. Quantify team size, projects led, and results achieved. Example: 'Led a team of 5 developers to deliver project 2 weeks ahead of schedule.'"
+                elif any(word in user_question.lower() for word in ["skill", "technical", "software"]):
+                    response = "For skills section: List technical skills first, then soft skills. Use industry-standard terminology. Group related skills together. Consider a 'Core Competencies' section at the top."
+                elif any(word in user_question.lower() for word in ["experience", "work", "job"]):
+                    response = "For work experience: Use bullet points for each role. Start with action verbs. Include company name, job title, dates. Focus on achievements rather than duties. Quantify results with numbers."
+                elif any(word in user_question.lower() for word in ["education", "degree", "certification"]):
+                    response = "For education: List most recent degree first. Include institution, degree, graduation year. Add relevant coursework or honors. Include certifications with issuing organization and date."
+                else:
+                    response = "Based on your analysis, I recommend focusing on the specific recommendations provided. Tailor your resume for each job application, and always include quantifiable achievements."
+                
+                st.markdown(f"""
+                <div class="tip-box">
+                    <strong>🤖 AI Assistant:</strong><br>
+                    {response}
+                </div>
+                """, unsafe_allow_html=True)
 
+# ===============================
+# Run Application
+# ===============================
 if __name__ == "__main__":
     main()
